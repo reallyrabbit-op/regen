@@ -1,0 +1,14 @@
+name: LifestealRegion
+main: me.reallyrabbit.lifestealRegion.LifestealRegion
+version: '${project.version}'
+api-version: '1.21'
+commands:
+  resetregion:
+    description: Resets the selected region.
+    usage: /resetregion
+  getwand:
+    description: Gives the player a wand to select regions.
+    usage: /getwand
+  startregen:
+    description: Starts the region regeneration task.
+    usage: /startregen
