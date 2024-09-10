@@ -1,0 +1,242 @@
+package me.reallyrabbit.lifestealRegion;
+
+import org.bukkit.Bukkit;
+import org.bukkit.Location;
+import org.bukkit.Material;
+import org.bukkit.World;
+import org.bukkit.block.Block;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandSender;
+import org.bukkit.command.TabCompleter;
+import org.bukkit.entity.Player;
+import org.bukkit.event.Listener;
+import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.EventHandler;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scheduler.BukkitRunnable;
+import org.jetbrains.annotations.NotNull;
+
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+
+public class LifestealRegion extends JavaPlugin implements Listener {
+
+    private Location pos1 = null;
+    private Location pos2 = null;
+    private final HashMap<Location, Material> savedRegion = new HashMap<>();
+    private boolean regionSelected = false;
+    private BukkitRunnable regenTask = null;
+    private boolean isRegenActive = false;
+
+    @Override
+    public void onEnable() {
+        // Register event listener
+        Bukkit.getPluginManager().registerEvents(this, this);
+
+        // Register commands and tab completers
+        getCommand("resetregion").setExecutor(this);
+        getCommand("getwand").setExecutor(this);
+        getCommand("startregen").setExecutor(this);
+
+        getCommand("resetregion").setTabCompleter(new LifestealTabCompleter());
+        getCommand("getwand").setTabCompleter(new LifestealTabCompleter());
+        getCommand("startregen").setTabCompleter(new LifestealTabCompleter());
+
+        getLogger().info("LifestealRegion enabled!");
+    }
+
+    @Override
+    public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, @NotNull String[] args) {
+        logCommandDetails(command, args);
+
+        if (command.getName().equalsIgnoreCase("resetregion")) {
+            if (args.length == 0) {
+                getLogger().info("Executing /resetregion with no arguments.");
+                regenerateRegion();
+                sender.sendMessage("Region has been reset.");
+            } else {
+                sender.sendMessage("Usage: /resetregion");
+            }
+            return true;
+        }
+
+        if (command.getName().equalsIgnoreCase("getwand")) {
+            if (args.length == 0) {
+                getLogger().info("Executing /getwand with no arguments.");
+                if (sender instanceof Player player) {
+                    ItemStack wand = new ItemStack(Material.STICK); // The wand is a stick
+                    player.getInventory().addItem(wand);
+                    player.sendMessage("You have been given the region selection wand.");
+                } else {
+                    sender.sendMessage("Only players can use this command.");
+                }
+            } else {
+                sender.sendMessage("Usage: /getwand");
+            }
+            return true;
+        }
+
+        if (command.getName().equalsIgnoreCase("startregen")) {
+            if (args.length == 0) {
+                getLogger().info("Executing /startregen with no arguments.");
+                if (!isRegenActive) {
+                    startRegenerationTask();
+                    sender.sendMessage("Region regeneration has been set.");
+                } else {
+                    sender.sendMessage("Region regeneration is already active.");
+                }
+            } else {
+                sender.sendMessage("Usage: /startregen");
+            }
+            return true;
+        }
+
+        // Log unknown commands
+        getLogger().warning("Unknown command: " + command.getName());
+        sender.sendMessage("Unknown command. Type /help for help.");
+        return false;
+    }
+
+    private void logCommandDetails(Command command, String[] args) {
+        getLogger().info("Command received: " + command.getName()); // Log command name
+        getLogger().info("Arguments: " + String.join(", ", args)); // Log arguments
+    }
+
+    @Override
+    public void onDisable() {
+        if (regenTask != null) {
+            regenTask.cancel();
+        }
+        getLogger().info("LifestealRegion disabled!");
+    }
+
+    @EventHandler
+    public void onPlayerInteract(@NotNull PlayerInteractEvent event) {
+        Player player = event.getPlayer();
+        ItemStack item = player.getInventory().getItemInMainHand();
+
+        if (item.getType() == Material.STICK && event.getClickedBlock() != null) {
+            // Get the clicked block's location
+            Location clickedBlock = event.getClickedBlock().getLocation();
+
+            // Determine action and set positions
+            if (event.getAction() == org.bukkit.event.block.Action.LEFT_CLICK_BLOCK) {
+                if (pos1 == null) {
+                    pos1 = clickedBlock;
+                    player.sendMessage("You have selected the first position.");
+                } else {
+                    pos1 = clickedBlock;  // Replace the first position
+                    player.sendMessage("First position has been updated.");
+                }
+            } else if (event.getAction() == org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK) {
+                if (pos1 != null && pos2 == null) {
+                    pos2 = clickedBlock;
+                    player.sendMessage("You have selected the second position.");
+                    regionSelected = true;
+                    saveRegion();
+                } else if (pos1 == null) {
+                    player.sendMessage("First position must be set before setting the second position.");
+                } else {
+                    pos2 = clickedBlock;  // Replace the second position
+                    player.sendMessage("Second position has been updated.");
+                    regionSelected = true;
+                    saveRegion();
+                }
+            }
+        }
+    }
+
+    // Save the blocks in the region between pos1 and pos2
+    private void saveRegion() {
+        if (pos1 != null && pos2 != null && regionSelected) {
+            savedRegion.clear();
+            World world = pos1.getWorld();
+            int minX = Math.min(pos1.getBlockX(), pos2.getBlockX());
+            int maxX = Math.max(pos1.getBlockX(), pos2.getBlockX());
+            int minY = Math.min(pos1.getBlockY(), pos2.getBlockY());
+            int maxY = Math.max(pos1.getBlockY(), pos2.getBlockY());
+            int minZ = Math.min(pos1.getBlockZ(), pos2.getBlockZ());
+            int maxZ = Math.max(pos1.getBlockZ(), pos2.getBlockZ());
+
+            for (int x = minX; x <= maxX; x++) {
+                for (int y = minY; y <= maxY; y++) {
+                    for (int z = minZ; z <= maxZ; z++) {
+                        Location loc = new Location(world, x, y, z);
+                        savedRegion.put(loc, loc.getBlock().getType());
+                    }
+                }
+            }
+        }
+    }
+
+    // Reset the region to the saved state while removing extra blocks
+    private void regenerateRegion() {
+        if (!savedRegion.isEmpty()) {
+            for (Location loc : savedRegion.keySet()) {
+                Block block = loc.getBlock();
+                Material originalMaterial = savedRegion.get(loc);
+
+                if (block.getType() != originalMaterial) {
+                    block.setType(originalMaterial); // Revert only modified blocks
+                }
+            }
+            // Remove any extra blocks that were placed in the region but not part of the saved state
+            World world = pos1.getWorld();
+            int minX = Math.min(pos1.getBlockX(), pos2.getBlockX());
+            int maxX = Math.max(pos1.getBlockX(), pos2.getBlockX());
+            int minY = Math.min(pos1.getBlockY(), pos2.getBlockY());
+            int maxY = Math.max(pos1.getBlockY(), pos2.getBlockY());
+            int minZ = Math.min(pos1.getBlockZ(), pos2.getBlockZ());
+            int maxZ = Math.max(pos1.getBlockZ(), pos2.getBlockZ());
+
+            for (int x = minX; x <= maxX; x++) {
+                for (int y = minY; y <= maxY; y++) {
+                    for (int z = minZ; z <= maxZ; z++) {
+                        Location loc = new Location(world, x, y, z);
+                        if (!savedRegion.containsKey(loc)) {
+                            Block block = loc.getBlock();
+                            if (block.getType() != Material.AIR) {
+                                block.setType(Material.AIR); // Remove any extra blocks placed
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Start the region regeneration task
+    private void startRegenerationTask() {
+        regenTask = new BukkitRunnable() {
+            @Override
+            public void run() {
+                regenerateRegion();
+            }
+        };
+        regenTask.runTaskTimer(this, 0L, 6000L); // 5 minutes (6000 ticks)
+        isRegenActive = true;
+    }
+}
+
+class LifestealTabCompleter implements TabCompleter {
+
+    @Override
+    public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+        List<String> completions = new ArrayList<>();
+
+        if (args.length == 1) {
+            if (command.getName().equalsIgnoreCase("resetregion")) {
+                completions.add("resetregion");
+            } else if (command.getName().equalsIgnoreCase("getwand")) {
+                completions.add("getwand");
+            } else if (command.getName().equalsIgnoreCase("startregen")) {
+                completions.add("startregen");
+            }
+        }
+
+        return completions;
+    }
+}
